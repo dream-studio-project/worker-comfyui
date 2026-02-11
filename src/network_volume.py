@@ -14,11 +14,30 @@ MODEL_TYPES = {
     "clip_vision": [".safetensors", ".pt", ".bin"],
     "configs": [".yaml", ".json"],
     "controlnet": [".safetensors", ".pt", ".pth", ".bin"],
+    "diffusion_models": [".safetensors", ".pt", ".bin"],
     "embeddings": [".safetensors", ".pt", ".bin"],
     "loras": [".safetensors", ".pt"],
+    "text_encoders": [".safetensors", ".pt", ".bin"],
     "upscale_models": [".safetensors", ".pt", ".pth"],
     "vae": [".safetensors", ".pt", ".bin"],
     "unet": [".safetensors", ".pt", ".bin"],
+}
+
+# Optional static input files (for Load Image / Load Video, etc.)
+INPUT_EXTENSIONS = {
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".webp",
+    ".bmp",
+    ".gif",
+    ".tif",
+    ".tiff",
+    ".mp4",
+    ".mov",
+    ".webm",
+    ".avi",
+    ".mkv",
 }
 
 
@@ -112,6 +131,34 @@ def run_network_volume_diagnostics():
         else:
             print(f"\n    {model_type}/: (directory not found)")
 
+    # List optional static input directory contents
+    input_dir = os.path.join(runpod_volume, "input")
+    print(f"\n    input/:")
+    if os.path.isdir(input_dir):
+        input_files = []
+        try:
+            for f in os.listdir(input_dir):
+                file_path = os.path.join(input_dir, f)
+                if os.path.isfile(file_path):
+                    ext = os.path.splitext(f)[1].lower()
+                    size = os.path.getsize(file_path)
+                    size_str = format_size(size)
+                    if ext in INPUT_EXTENSIONS:
+                        input_files.append(f"{f} ({size_str})")
+                    else:
+                        input_files.append(f"{f} ({size_str}, ⚠️ uncommon input extension)")
+        except Exception as e:
+            print(f"      Error reading directory - {e}")
+            input_files = []
+
+        if input_files:
+            for f in input_files:
+                print(f"      - {f}")
+        else:
+            print("      (empty)")
+    else:
+        print("      (directory not found)")
+
     # Summary
     print("\n[5] Summary")
     if found_any_models:
@@ -138,9 +185,13 @@ def print_expected_structure():
     print("        ├── loras/          <- Put your LoRA files here")
     print("        ├── vae/            <- Put your VAE files here")
     print("        ├── clip/           <- Put your CLIP models here")
+    print("        ├── clip_vision/    <- Put your CLIP vision models here")
     print("        ├── controlnet/     <- Put your ControlNet models here")
+    print("        ├── diffusion_models/ <- Put diffusion models here")
     print("        ├── embeddings/     <- Put your embedding files here")
+    print("        ├── text_encoders/  <- Put text encoder models here")
     print("        └── upscale_models/ <- Put your upscale models here")
+    print("    /runpod-volume/input/   <- Optional static input files")
 
 
 def format_size(size_bytes):
