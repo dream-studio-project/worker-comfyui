@@ -50,6 +50,7 @@ COMFY_HOST = "127.0.0.1:8188"
 # Enforce a clean state after each job is done
 # see https://docs.runpod.io/docs/handler-additional-controls#refresh-worker
 REFRESH_WORKER = os.environ.get("REFRESH_WORKER", "false").lower() == "true"
+COMFY_LOG_FILE = os.environ.get("COMFY_LOG_FILE", "/tmp/comfyui.log")
 
 # ---------------------------------------------------------------------------
 # Helper: quick reachability probe of ComfyUI HTTP endpoint (port 8188)
@@ -66,6 +67,25 @@ def _comfy_server_status():
         }
     except Exception as exc:
         return {"reachable": False, "error": str(exc)}
+
+
+def _print_recent_comfyui_logs(max_lines=80):
+    """Print the tail of ComfyUI startup/runtime logs for easier crash diagnosis."""
+    if not os.path.isfile(COMFY_LOG_FILE):
+        print(f"worker-comfyui - No ComfyUI log file found at {COMFY_LOG_FILE}")
+        return
+
+    try:
+        with open(COMFY_LOG_FILE, "r", encoding="utf-8", errors="replace") as f:
+            lines = f.readlines()
+        tail = lines[-max_lines:] if lines else []
+        print(
+            f"worker-comfyui - Last {len(tail)} line(s) from ComfyUI log ({COMFY_LOG_FILE}):"
+        )
+        for line in tail:
+            print(f"  {line.rstrip()}")
+    except Exception as exc:
+        print(f"worker-comfyui - Could not read ComfyUI log file: {exc}")
 
 
 def _attempt_websocket_reconnect(ws_url, max_attempts, delay_s, initial_error):
@@ -221,6 +241,7 @@ def check_server(url, retries=500, delay=50):
     print(
         f"worker-comfyui - Failed to connect to server at {url} after {retries} attempts."
     )
+    _print_recent_comfyui_logs()
     return False
 
 
