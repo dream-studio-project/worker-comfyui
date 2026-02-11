@@ -7,8 +7,8 @@ FROM ${BASE_IMAGE} AS base
 # Build arguments for this stage with sensible defaults for standalone builds
 ARG COMFYUI_VERSION=latest
 ARG CUDA_VERSION_FOR_COMFY
-ARG ENABLE_PYTORCH_UPGRADE=false
-ARG PYTORCH_INDEX_URL
+ARG ENABLE_PYTORCH_UPGRADE=true
+ARG PYTORCH_INDEX_URL=https://download.pytorch.org/whl/cu128
 
 # Prevents prompts from packages asking for user input during installation
 ENV DEBIAN_FRONTEND=noninteractive
@@ -58,7 +58,9 @@ RUN if [ -n "${CUDA_VERSION_FOR_COMFY}" ]; then \
 
 # Upgrade PyTorch if needed (for newer CUDA versions)
 RUN if [ "$ENABLE_PYTORCH_UPGRADE" = "true" ]; then \
-      uv pip install --force-reinstall torch torchvision torchaudio --index-url ${PYTORCH_INDEX_URL}; \
+      echo "worker-comfyui: Upgrading torch stack from ${PYTORCH_INDEX_URL}"; \
+      uv pip uninstall -y torch torchvision torchaudio || true; \
+      uv pip install --no-cache-dir --force-reinstall --index-url "${PYTORCH_INDEX_URL}" torch torchvision torchaudio; \
     fi
 
 # Change working directory to ComfyUI
@@ -93,6 +95,17 @@ RUN chmod +x /usr/local/bin/comfy-manager-set-mode
 
 # Install GGUF dependencies
 RUN uv pip install -U transformers accelerate safetensors sentencepiece gguf
+
+# Fail build early if torch/torchvision are mismatched (common nms crash at runtime)
+RUN python - <<'PY'
+import torch
+import torchvision
+from torchvision.ops import nms
+
+print(f"torch={torch.__version__}")
+print(f"torchvision={torchvision.__version__}")
+print(f"nms callable={callable(nms)}")
+PY
 
 # Set the default command to run when starting the container
 CMD ["/start.sh"]

@@ -28,7 +28,7 @@ variable "ENABLE_PYTORCH_UPGRADE" {
 }
 
 variable "PYTORCH_INDEX_URL" {
-  default = ""
+  default = "https://download.pytorch.org/whl/cu128"
 }
 
 variable "HUGGINGFACE_ACCESS_TOKEN" {
