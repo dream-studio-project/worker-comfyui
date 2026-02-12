@@ -14,6 +14,13 @@ import tempfile
 import socket
 import traceback
 import logging
+import mimetypes
+from datetime import timedelta
+
+try:
+    from google.cloud import storage as gcs_storage
+except Exception:
+    gcs_storage = None
 
 from network_volume import (
     is_network_volume_debug_enabled,
@@ -51,6 +58,7 @@ COMFY_HOST = "127.0.0.1:8188"
 # see https://docs.runpod.io/docs/handler-additional-controls#refresh-worker
 REFRESH_WORKER = os.environ.get("REFRESH_WORKER", "false").lower() == "true"
 COMFY_LOG_FILE = os.environ.get("COMFY_LOG_FILE", "/tmp/comfyui.log")
+_GCS_CLIENT = None
 
 # ---------------------------------------------------------------------------
 # Helper: quick reachability probe of ComfyUI HTTP endpoint (port 8188)
@@ -86,6 +94,92 @@ def _print_recent_comfyui_logs(max_lines=80):
             print(f"  {line.rstrip()}")
     except Exception as exc:
         print(f"worker-comfyui - Could not read ComfyUI log file: {exc}")
+
+
+def _is_gcs_upload_enabled():
+    """Whether native GCS upload is enabled via env vars."""
+    return bool(os.environ.get("GCS_BUCKET_NAME"))
+
+
+def _get_gcs_client():
+    """
+    Build (and cache) a Google Cloud Storage client.
+    Supports either ADC/GOOGLE_APPLICATION_CREDENTIALS or inline JSON credentials.
+    """
+    global _GCS_CLIENT
+    if _GCS_CLIENT is not None:
+        return _GCS_CLIENT
+
+    if gcs_storage is None:
+        raise RuntimeError(
+            "google-cloud-storage is not installed. Add it to runtime dependencies."
+        )
+
+    service_account_json = os.environ.get("GCS_SERVICE_ACCOUNT_JSON")
+    service_account_json_b64 = os.environ.get("GCS_SERVICE_ACCOUNT_JSON_BASE64")
+
+    if service_account_json_b64:
+        try:
+            service_account_json = base64.b64decode(service_account_json_b64).decode(
+                "utf-8"
+            )
+        except Exception as exc:
+            raise RuntimeError(
+                f"Invalid GCS_SERVICE_ACCOUNT_JSON_BASE64 value: {exc}"
+            ) from exc
+
+    if service_account_json:
+        try:
+            _GCS_CLIENT = gcs_storage.Client.from_service_account_info(
+                json.loads(service_account_json)
+            )
+            return _GCS_CLIENT
+        except Exception as exc:
+            raise RuntimeError(
+                f"Invalid GCS_SERVICE_ACCOUNT_JSON credentials: {exc}"
+            ) from exc
+
+    _GCS_CLIENT = gcs_storage.Client()
+    return _GCS_CLIENT
+
+
+def _upload_image_to_gcs(job_id, filename, image_bytes):
+    """
+    Upload output bytes to GCS and return a URL string.
+    URL strategy (in order):
+      1. Signed URL if GCS_SIGNED_URL_TTL_SECONDS > 0
+      2. Custom public base URL if GCS_PUBLIC_BASE_URL is set
+      3. Standard storage.googleapis.com URL
+    """
+    bucket_name = os.environ.get("GCS_BUCKET_NAME")
+    if not bucket_name:
+        raise RuntimeError("GCS_BUCKET_NAME is not set.")
+
+    prefix = os.environ.get("GCS_OUTPUT_PREFIX", "").strip("/")
+    object_path = f"{job_id}/{filename}"
+    if prefix:
+        object_path = f"{prefix}/{object_path}"
+
+    client = _get_gcs_client()
+    bucket = client.bucket(bucket_name)
+    blob = bucket.blob(object_path)
+
+    content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+    blob.upload_from_string(image_bytes, content_type=content_type)
+
+    signed_ttl_s = int(os.environ.get("GCS_SIGNED_URL_TTL_SECONDS", "0"))
+    if signed_ttl_s > 0:
+        return blob.generate_signed_url(
+            version="v4", expiration=timedelta(seconds=signed_ttl_s), method="GET"
+        )
+
+    public_base_url = os.environ.get("GCS_PUBLIC_BASE_URL", "").rstrip("/")
+    if public_base_url:
+        quoted_path = urllib.parse.quote(object_path, safe="/")
+        return f"{public_base_url}/{quoted_path}"
+
+    quoted_path = urllib.parse.quote(object_path, safe="/")
+    return f"https://storage.googleapis.com/{bucket_name}/{quoted_path}"
 
 
 def _attempt_websocket_reconnect(ws_url, max_attempts, delay_s, initial_error):
@@ -733,7 +827,27 @@ def handler(job):
                     if image_bytes:
                         file_extension = os.path.splitext(filename)[1] or ".png"
 
-                        if os.environ.get("BUCKET_ENDPOINT_URL"):
+                        if _is_gcs_upload_enabled():
+                            try:
+                                print(f"worker-comfyui - Uploading {filename} to GCS...")
+                                gcs_url = _upload_image_to_gcs(
+                                    job_id, filename, image_bytes
+                                )
+                                print(
+                                    f"worker-comfyui - Uploaded {filename} to GCS: {gcs_url}"
+                                )
+                                output_data.append(
+                                    {
+                                        "filename": filename,
+                                        "type": "s3_url",
+                                        "data": gcs_url,
+                                    }
+                                )
+                            except Exception as e:
+                                error_msg = f"Error uploading {filename} to GCS: {e}"
+                                print(f"worker-comfyui - {error_msg}")
+                                errors.append(error_msg)
+                        elif os.environ.get("BUCKET_ENDPOINT_URL"):
                             try:
                                 with tempfile.NamedTemporaryFile(
                                     suffix=file_extension, delete=False

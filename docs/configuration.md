@@ -67,3 +67,23 @@ If the S3 environment variables (`BUCKET_ENDPOINT_URL`, `BUCKET_ACCESS_KEY_ID`, 
 ```
 
 The `data` field contains the presigned URL to the uploaded image file in your S3 bucket. The path usually includes the job ID.
+
+## Google Cloud Storage (Native) Upload Configuration
+
+Configure these variables if you want native GCS uploads (without S3-compatible signing).  
+When enabled, this mode takes precedence over S3 env vars and returns URL strings in `output.images[].data`.
+
+| Environment Variable         | Description                                                                                                      | Example |
+| ---------------------------- | ---------------------------------------------------------------------------------------------------------------- | ------- |
+| `GCS_BUCKET_NAME`            | Target GCS bucket name. **Required to enable native GCS upload.**                                              | `my-media-bucket` |
+| `GCS_SERVICE_ACCOUNT_JSON`   | Optional inline service-account JSON string. If omitted, ADC (`GOOGLE_APPLICATION_CREDENTIALS`) is used.      | `{"type":"service_account",...}` |
+| `GCS_SERVICE_ACCOUNT_JSON_BASE64` | Optional base64-encoded service-account JSON (useful when env var UIs mangle special characters). If set, this value takes precedence over `GCS_SERVICE_ACCOUNT_JSON`. | `eyJ0eXBlIjoic2VydmljZV9hY2NvdW50IiwuLi59` |
+| `GCS_OUTPUT_PREFIX`          | Optional prefix/folder used before `<job_id>/<filename>`.                                                       | `comfy-outputs` |
+| `GCS_SIGNED_URL_TTL_SECONDS` | Optional TTL in seconds for generated signed URLs. If `0`/unset, worker returns standard/public object URLs.   | `3600` |
+| `GCS_PUBLIC_BASE_URL`        | Optional custom base URL for public buckets/CDN.                                                                 | `https://storage.googleapis.com/my-media-bucket` |
+
+Notes:
+
+- If `GCS_BUCKET_NAME` is set, native GCS upload path is used.
+- Output object key format is `<prefix>/<job_id>/<filename>` (prefix omitted when empty).
+- `output.images[].type` remains `"s3_url"` for backward compatibility with existing clients.
