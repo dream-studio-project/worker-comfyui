@@ -26,6 +26,10 @@ if [ -d "${NETWORK_VOLUME_INPUT_DIR}" ]; then
         else
             echo "worker-comfyui: /comfyui/input is not empty, keeping existing directory"
             echo "worker-comfyui: (network volume input available at ${NETWORK_VOLUME_INPUT_DIR})"
+            # Fallback for images/videos when symlink cannot be created:
+            # mirror static assets from network volume into ComfyUI input (non-destructive).
+            cp -an "${NETWORK_VOLUME_INPUT_DIR}/." "${COMFY_INPUT_DIR}/" 2>/dev/null || true
+            echo "worker-comfyui: Synced network volume input files into /comfyui/input"
         fi
     else
         ln -s "${NETWORK_VOLUME_INPUT_DIR}" "${COMFY_INPUT_DIR}"
